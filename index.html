@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    body {
+      font-family: system-ui, sans-serif;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      margin: 0;
+      background: #f0f9ff;
+    }
+    
+    .game-container {
+      width: 100%;
+      max-width: 600px;
+      padding: 20px;
+    }
+    
+    .stats {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 20px;
+    }
+    
+    .stat {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    
+    .game-card {
+      background: white;
+      border-radius: 12px;
+      padding: 32px;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+      position: relative;
+      overflow: hidden;
+    }
+    
+    .risk-bar {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 8px;
+      background: #e5e7eb;
+    }
+    
+    .risk-fill {
+      height: 100%;
+      width: 0%;
+      transition: all 0.2s;
+    }
+    
+    .balloon {
+      width: 100px;
+      height: 100px;
+      border-radius: 50%;
+      margin: 0 auto;
+      transition: all 0.1s ease-in-out;
+      position: relative;
+    }
+    
+    .particle {
+      position: absolute;
+      width: 4px;
+      height: 4px;
+      border-radius: 50%;
+      pointer-events: none;
+    }
+    
+    button {
+      background: linear-gradient(to right, #3b82f6, #2563eb);
+      color: white;
+      border: none;
+      padding: 16px 32px;
+      border-radius: 8px;
+      font-size: 18px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    
+    button:hover {
+      background: linear-gradient(to right, #2563eb, #1d4ed8);
+    }
+    
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    
+    .score {
+      font-size: 24px;
+      font-weight: bold;
+      margin-top: 16px;
+    }
+    
+    .explode {
+      animation: ping 0.5s cubic-bezier(0, 0, 0.2, 1);
+    }
+    
+    @keyframes ping {
+      75%, 100% {
+        transform: scale(2);
+        opacity: 0;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="game-container">
+    <div class="stats">
+      <div class="stat">
+        <span>🏆</span>
+        <span id="highscore">0</span>
+      </div>
+      <div class="stat">
+        <span>💰</span>
+        <span id="coins">0</span>
+      </div>
+      <div class="stat">
+        <span>⭐</span>
+        <span id="level">1</span>
+      </div>
+      <div class="stat">
+        <span>📈</span>
+        <span id="multiplier">1x</span>
+      </div>
+    </div>
+    
+    <div class="game-card">
+      <div class="risk-bar">
+        <div class="risk-fill" id="risk"></div>
+      </div>
+      
+      <div id="balloon" class="balloon"></div>
+      
+      <div style="text-align: center; margin-top: 32px;">
+        <button id="pump">Hold to Pump!</button>
+        <div class="score" id="score">0</div>
+        <div id="streak">Streak: 0</div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let size = 100;
+    let score = 0;
+    let highscore = 0;
+    let coins = 0;
+    let multiplier = 1;
+    let streak = 0;
+    let level = 1;
+    let isExploded = false;
+    let particles = [];
+    let popThreshold;
+    
+    const balloon = document.getElementById('balloon');
+    const pumpBtn = document.getElementById('pump');
+    const riskBar = document.getElementById('risk');
+    
+    function resetGame() {
+      size = 100;
+      isExploded = false;
+      popThreshold = Math.floor(Math.random() * (50 + level * 10)) + 150;
+      updateBalloon();
+      pumpBtn.disabled = false;
+      pumpBtn.textContent = 'Hold to Pump!';
+    }
+    
+    function createParticle(x, y, color) {
+      const particle = document.createElement('div');
+      particle.className = 'particle';
+      particle.style.left = x + 'px';
+      particle.style.top = y + 'px';
+      particle.style.backgroundColor = color;
+      
+      const angle = Math.random() * Math.PI * 2;
+      const velocity = Math.random() * 10;
+      const vx = Math.cos(angle) * velocity;
+      const vy = Math.sin(angle) * velocity;
+      
+      particles.push({
+        element: particle,
+        x, y, vx, vy,
+        life: 50
+      });
+      
+      balloon.parentElement.appendChild(particle);
+    }
+    
+    function updateParticles() {
+      particles = particles.filter(p => {
+        p.x += p.vx;
+        p.y += p.vy;
+        p.vy += 0.2;
+        p.life--;
+        
+        p.element.style.left = p.x + 'px';
+        p.element.style.top = p.y + 'px';
+        p.element.style.opacity = p.life / 50;
+        
+        if (p.life <= 0) {
+          p.element.remove();
+          return false;
+        }
+        return true;
+      });
+    }
+    
+    function createExplosion() {
+      const rect = balloon.getBoundingClientRect();
+      for (let i = 0; i < 20; i++) {
+        createParticle(
+          rect.left + rect.width/2,
+          rect.top + rect.height/2,
+          isExploded ? 'red' : 'gold'
+        );
+      }
+    }
+    
+    function updateBalloon() {
+      balloon.style.width = size + 'px';
+      balloon.style.height = size + 'px';
+      balloon.style.background = `linear-gradient(135deg, 
+        hsl(${size}, 70%, 60%), 
+        hsl(${size}, 70%, 40%))`;
+      balloon.style.boxShadow = `0 0 ${size/10}px hsl(${size}, 70%, 50%)`;
+      
+      const risk = Math.min(((size - 100) / (popThreshold - 100)) * 100, 100);
+      riskBar.style.width = risk + '%';
+      riskBar.style.backgroundColor = `hsl(${120 - risk * 1.2}, 70%, 50%)`;
+    }
+    
+    function updateStats() {
+      document.getElementById('score').textContent = score;
+      document.getElementById('highscore').textContent = highscore;
+      document.getElementById('coins').textContent = coins;
+      document.getElementById('level').textContent = level;
+      document.getElementById('multiplier').textContent = multiplier + 'x';
+      document.getElementById('streak').textContent = 'Streak: ' + streak;
+    }
+    
+    pumpBtn.addEventListener('mousedown', () => {
+      if (!isExploded) {
+        const interval = setInterval(() => {
+          if (size >= popThreshold) {
+            isExploded = true;
+            balloon.classList.add('explode');
+            createExplosion();
+            pumpBtn.disabled = true;
+            pumpBtn.textContent = 'Game Over!';
+            streak = 0;
+            multiplier = 1;
+            clearInterval(interval);
+          } else {
+            size += 2;
+            updateBalloon();
+          }
+        }, 50);
+        
+        pumpBtn.addEventListener('mouseup', () => {
+          clearInterval(interval);
+          if (!isExploded) {
+            const points = Math.floor((size - 100) * multiplier);
+            score += points;
+            coins += Math.floor(points / 10);
+            streak++;
+            
+            if (streak > 0 && streak % 3 === 0) {
+              multiplier = Math.min(multiplier + 0.5, 5);
+              level++;
+            }
+            
+            if (size > highscore) {
+              highscore = size;
+            }
+            
+            createExplosion();
+            updateStats();
+            resetGame();
+          }
+        }, { once: true });
+      }
+    });
+    
+    setInterval(updateParticles, 16);
+    resetGame();
+    updateStats();
+  </script>
+</body>
+</html>
