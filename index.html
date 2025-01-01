@@ -9,7 +9,7 @@
       align-items: center;
       min-height: 100vh;
       margin: 0;
-      background: #f66666;
+      background: #f0f9ff;
     }
     
     .game-container {
@@ -107,6 +107,91 @@
         opacity: 0;
       }
     }
+
+    .achievement {
+      position: fixed;
+      top: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: gold;
+      padding: 10px 20px;
+      border-radius: 5px;
+      animation: slideIn 0.5s ease-out;
+    }
+
+    @keyframes slideIn {
+      from { top: -50px; opacity: 0; }
+      to { top: 20px; opacity: 1; }
+    }
+
+    .players-container {
+      position: fixed;
+      right: 20px;
+      top: 20px;
+      background: rgba(0,0,0,0.8);
+      padding: 15px;
+      border-radius: 10px;
+      color: white;
+    }
+    
+    .player-item {
+      margin: 5px 0;
+      padding: 5px;
+      border-radius: 5px;
+      background: rgba(255,255,255,0.1);
+    }
+    
+    #game-controls {
+      position: fixed;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      gap: 10px;
+    }
+    
+    button {
+      padding: 10px 20px;
+      border-radius: 5px;
+      border: none;
+      background: #4CAF50;
+      color: white;
+      cursor: pointer;
+      transition: 0.3s;
+    }
+    
+    button:hover {
+      background: #45a049;
+    }
+
+    .particle {
+      position: absolute;
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      pointer-events: none;
+      z-index: 1000;
+    }
+    
+    @keyframes shake {
+      10%, 90% { transform: translate3d(-1px, 0, 0); }
+      20%, 80% { transform: translate3d(2px, 0, 0); }
+      30%, 50%, 70% { transform: translate3d(-4px, 0, 0); }
+      40%, 60% { transform: translate3d(4px, 0, 0); }
+    }
+    
+    .powerup {
+      position: absolute;
+      width: 30px;
+      height: 30px;
+      border-radius: 50%;
+      animation: float 2s ease-in-out infinite;
+    }
+    
+    @keyframes float {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-10px); }
+    }
   </style>
 </head>
 <body>
@@ -139,10 +224,21 @@
       
       <div style="text-align: center; margin-top: 32px;">
         <button id="pump">Hold to Pump!</button>
+        <button id="restart">Restart</button>
         <div class="score" id="score">0</div>
         <div id="streak">Streak: 0</div>
       </div>
     </div>
+  </div>
+
+  <div id="players-list" class="players-container">
+    <h3>Players</h3>
+    <div id="players"></div>
+  </div>
+  <div id="game-controls">
+    <button id="restart-game">Restart Game</button>
+    <input type="text" id="player-name" placeholder="Enter your name">
+    <button id="join-game">Join Game</button>
   </div>
 
   <script>
@@ -156,6 +252,21 @@
     let isExploded = false;
     let particles = [];
     let popThreshold;
+    let powerups = [];
+    let comboTimer = 0;
+    const POWERUP_TYPES = ['double', 'shield', 'time'];
+    let activePowerups = {};
+    let achievements = {
+      bigPop: false,
+      speedRunner: false,
+      comboMaster: false
+    };
+
+    const sounds = {
+      pump: new Audio('pump.mp3'),
+      pop: new Audio('pop.mp3'),
+      powerup: new Audio('powerup.mp3')
+    };
     
     const balloon = document.getElementById('balloon');
     const pumpBtn = document.getElementById('pump');
@@ -168,6 +279,12 @@
       updateBalloon();
       pumpBtn.disabled = false;
       pumpBtn.textContent = 'Hold to Pump!';
+      if (socket && socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({
+          type: 'reset',
+          id: currentPlayer
+        }));
+      }
     }
     
     function createParticle(x, y, color) {
@@ -190,17 +307,160 @@
       
       balloon.parentElement.appendChild(particle);
     }
+
+    const players = {};
+    let currentPlayer = null;
+    let socket = null;
+    let gameState = 'waiting'; // waiting, playing, ended
+    let backgroundParticles = [];
+    
+    // Add WebSocket connection
+    function initializeMultiplayer() {
+      socket = new WebSocket('ws://localhost:3000');
+      
+      socket.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        switch(data.type) {
+          case 'playerJoined':
+            players[data.id] = {
+              score: 0,
+              size: 100,
+              name: data.name
+            };
+            break;
+          case 'updateBalloon':
+            players[data.id].size = data.size;
+            break;
+          case 'playerPopped':
+            handlePlayerPop(data.id);
+            break;
+        }
+        updatePlayersUI();
+      };
+    }
+    
+    function handlePlayerPop(id) {
+      // Handle player pop logic
+    }
+
+    function updatePlayersUI() {
+      const playersList = document.getElementById('players');
+      playersList.innerHTML = '';
+      for (const id in players) {
+        const player = players[id];
+        const playerItem = document.createElement('div');
+        playerItem.className = 'player-item';
+        playerItem.textContent = `${player.name}: ${player.score}`;
+        playersList.appendChild(playerItem);
+      }
+    }
+
+    function createBackground() {
+      const canvas = document.createElement('canvas');
+      canvas.id = 'background';
+      canvas.style.position = 'fixed';
+      canvas.style.top = '0';
+      canvas.style.left = '0';
+      canvas.style.zIndex = '-1';
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+      document.body.prepend(canvas);
+      
+      animateBackground();
+    }
+    
+    function animateBackground() {
+      const canvas = document.getElementById('background');
+      const ctx = canvas.getContext('2d');
+      
+      function update() {
+        ctx.fillStyle = 'rgba(0,0,0,0.1)';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        
+        if (Math.random() < 0.1) {
+          backgroundParticles.push({
+            x: Math.random() * canvas.width,
+            y: canvas.height,
+            size: Math.random() * 3,
+            speed: Math.random() * 2 + 1
+          });
+        }
+        
+        backgroundParticles.forEach((p, i) => {
+          p.y -= p.speed;
+          ctx.fillStyle = `hsl(${p.y % 360}, 50%, 50%)`;
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+          ctx.fill();
+          
+          if (p.y < 0) backgroundParticles.splice(i, 1);
+        });
+        
+        requestAnimationFrame(update);
+      }
+      update();
+    }
+
+    const GAME_CONFIG = {
+      powerups: ['shield', 'double', 'slow', 'extra'],
+      particles: {
+        explosion: { count: 50, speed: 10, life: 100 },
+        trail: { count: 5, speed: 2, life: 30 }
+      },
+      combo: {
+        duration: 5000,
+        multiplier: 1.5
+      }
+    };
+    
+    let gameState = {
+      score: 0,
+      combo: 0,
+      multiplier: 1,
+      activePowerups: [],
+      achievements: new Set()
+    };
+    
+    function createParticle(x, y, color, type = 'explosion') {
+      const particle = document.createElement('div');
+      particle.className = `particle ${type}`;
+      
+      const config = GAME_CONFIG.particles[type];
+      const angle = Math.random() * Math.PI * 2;
+      const velocity = Math.random() * config.speed;
+      const vx = Math.cos(angle) * velocity;
+      const vy = Math.sin(angle) * velocity;
+      
+      particle.style.left = x + 'px';
+      particle.style.top = y + 'px';
+      particle.style.backgroundColor = color;
+      particle.style.boxShadow = `0 0 ${Math.random() * 10 + 5}px ${color}`;
+      
+      particles.push({
+        element: particle,
+        x, y, vx, vy,
+        life: config.life,
+        type,
+        rotation: Math.random() * 360,
+        scale: 1
+      });
+      
+      balloon.parentElement.appendChild(particle);
+    }
     
     function updateParticles() {
       particles = particles.filter(p => {
         p.x += p.vx;
         p.y += p.vy;
         p.vy += 0.2;
+        p.rotation += 5;
+        p.scale *= 0.98;
         p.life--;
         
+        p.element.style.transform = `rotate(${p.rotation}deg) scale(${p.scale})`;
         p.element.style.left = p.x + 'px';
         p.element.style.top = p.y + 'px';
-        p.element.style.opacity = p.life / 50;
+        p.element.style.opacity = p.life / GAME_CONFIG.particles[p.type].life;
         
         if (p.life <= 0) {
           p.element.remove();
@@ -212,13 +472,19 @@
     
     function createExplosion() {
       const rect = balloon.getBoundingClientRect();
-      for (let i = 0; i < 20; i++) {
+      const colors = ['#FF5252', '#FF4081', '#E040FB', '#7C4DFF'];
+      
+      for (let i = 0; i < GAME_CONFIG.particles.explosion.count; i++) {
         createParticle(
-          rect.left + rect.width/2,
-          rect.top + rect.height/2,
-          isExploded ? 'red' : 'gold'
+          rect.left + rect.width / 2,
+          rect.top + rect.height / 2,
+          colors[Math.floor(Math.random() * colors.length)],
+          'explosion'
         );
       }
+      
+      document.body.style.animation = 'shake 0.5s cubic-bezier(.36,.07,.19,.97) both';
+      setTimeout(() => document.body.style.animation = '', 500);
     }
     
     function updateBalloon() {
@@ -242,8 +508,73 @@
       document.getElementById('multiplier').textContent = multiplier + 'x';
       document.getElementById('streak').textContent = 'Streak: ' + streak;
     }
+
+    function spawnPowerup() {
+      if (Math.random() < 0.1) {
+        const type = POWERUP_TYPES[Math.floor(Math.random() * POWERUP_TYPES.length)];
+        powerups.push({
+          x: Math.random() * canvas.width,
+          y: Math.random() * canvas.height,
+          type: type,
+          time: 5000
+        });
+      }
+    }
+
+    function updatePowerups() {
+      powerups = powerups.filter(p => {
+        p.time -= 16;
+        if (p.time <= 0) return false;
+        
+        const dx = p.x - canvas.width/2;
+        const dy = p.y - canvas.height/2;
+        if (Math.sqrt(dx*dx + dy*dy) < size/2) {
+          activatePowerup(p.type);
+          sounds.powerup.play();
+          return false;
+        }
+        return true;
+      });
+    }
+
+    function activatePowerup(type) {
+      switch(type) {
+        case 'double':
+          activePowerups.double = 5000;
+          multiplier *= 2;
+          break;
+        case 'shield':
+          activePowerups.shield = 3000;
+          break;
+        case 'time':
+          comboTimer += 3000;
+          break;
+      }
+    }
+
+    function updateCombo() {
+      if (comboTimer > 0) {
+        comboTimer -= 16;
+        if (streak >= 10 && !achievements.comboMaster) {
+          achievements.comboMaster = true;
+          showAchievement('Combo Master!');
+        }
+      } else {
+        streak = 0;
+        multiplier = 1;
+      }
+    }
+
+    function showAchievement(text) {
+      const achievement = document.createElement('div');
+      achievement.className = 'achievement';
+      achievement.textContent = text;
+      document.body.appendChild(achievement);
+      setTimeout(() => achievement.remove(), 3000);
+    }
     
     pumpBtn.addEventListener('mousedown', () => {
+      sounds.pump.play();
       if (!isExploded) {
         const interval = setInterval(() => {
           if (size >= popThreshold) {
@@ -286,9 +617,36 @@
       }
     });
     
-    setInterval(updateParticles, 16);
+    setInterval(() => {
+      updateParticles();
+      updatePowerups();
+      updateCombo();
+      spawnPowerup();
+    }, 16);
     resetGame();
     updateStats();
+
+    document.getElementById('restart').addEventListener('click', () => {
+      resetGame();
+      updateStats();
+    });
+
+    document.addEventListener('DOMContentLoaded', () => {
+      createBackground();
+      initializeMultiplayer();
+      
+      document.getElementById('join-game').addEventListener('click', () => {
+        const name = document.getElementById('player-name').value;
+        if (name) {
+          socket.send(JSON.stringify({
+            type: 'join',
+            name: name
+          }));
+        }
+      });
+      
+      document.getElementById('restart-game').addEventListener('click', resetGame);
+    });
   </script>
 </body>
 </html>
