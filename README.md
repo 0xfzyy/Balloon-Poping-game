@@ -2,5 +2,5 @@
 
 
 Multiplayer fun game.
-
-see who pops the balloon first
+Hold to pop the balloon
+See who pops the balloon first。
